@@ -1,1 +1,1 @@
-from .rx_wrapper import RX
+from .rx_wrapper import rx

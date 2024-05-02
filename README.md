@@ -29,7 +29,7 @@ class Counter(rx.Component):
     def decrement(self):
         self.count -= 1
 
-    # Above is the state definition with state variables and event handlers
+    # Above is the state definition with a state var, a computed var and event handlers
     #----------------------------------------------------------------------
     # Below is the get_component method that returns the state-dependant layout of the component
 
@@ -45,15 +45,15 @@ class Counter(rx.Component):
 # Notice also that state variables and event handlers can be accessed directly from self
 
 # Now we can reuse this component to create a page layout
-# No need to define counter=Counter.create, the Counter class can be instantiated directly
+# No need to define counter=Counter.create, the Counter class can be instantiated directly into Component objects
 
-@rx.page()
+@rx.page() # Decorators still work
 def index():
     cnt=Counter(count=10,background='blue') # we can intialize the count state value directly from props
     cnt.count=5
-    cnt.background='green' # or we can edit via attribute style access after instantiation
+    cnt.background='green' # we can also edit via attribute style access after instantiation
     btn1=rx.button("Click to add 2",on_click=cnt.set_count(cnt.count+2)) # we can use state setters like this
-    cnt2=Counter(count=cnt.double_count) # we can link a second counter's state to the first's, thus synchronizing their states. Doing so will ignore the second counter's internal state
+    cnt2=Counter(count=cnt.double_count) # we can link a second counter's state to the first's, thus synchronizing their states.
     box=rx.box(
         cnt,
         cnt2

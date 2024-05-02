@@ -9,7 +9,7 @@ from copy import copy
 
 def get_class_dict(cls,excluded=()):
     """
-    Returns a dict representing the class, excluding chosen attributes
+    Returns a dict representing a given class, excluding chosen attributes
     """
     class_dict = {
         '__name__': cls.__name__,
@@ -24,7 +24,7 @@ def get_class_dict(cls,excluded=()):
 
 def build_class(class_dict):
     """
-    Reconstruct a class from a class_dict
+    Reconstructs a class from a class_dict
     """
     class_dict=copy(class_dict)
     name = class_dict.pop('__name__')
@@ -271,6 +271,7 @@ class App(reflex.App):
 
 
 class rx_submodule:
+    
     _dict = {}
 
     def __init__(self, submodule_name):
