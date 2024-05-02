@@ -304,7 +304,7 @@ class rx_meta(type):
 
     def __getattr__(cls, key):
         if key in cls._reserved:
-            return getattr(rx,key)
+            return getattr(reflex,key)
         elif key in cls._submodules:
             return rx_submodule(key)
         elif key in globals():
