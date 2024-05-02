@@ -1,6 +1,9 @@
 # reflex-wrapper
 
-`reflex-wrapper` is a Python module that provides a wrapper on top of the reflex library to ease creating custom components as well as adding syntactic sugar to setup and interact with components after they are instantiated. It is meant to be "without loss", meaning that all that was possible to achieve with reflex is still possible using the wrapper, and as easily or more.
+`reflex-wrapper` is a Python module that provides a wrapper on top of the reflex library. It mostly behaves just like the reflex module, but simplifies the public API to make creating custom components more user-friendly. The idea behind this wrapper was that, in reflex, States are pydantic models (classes) who are only instantiated per-session by the server itself. This means that you never should instantiate a state classes directly in your reflex code. As a matter of fact, what would be considered "instances" of a State in reflex are actualy subclasses of an initial pydantic rx.State class (but still classes!).
+This design choice, while being very elegant on a technical point of view for input validation and multi-session state management, also made the objet model less intuitive to a regular python developper, who expects to create 3 independant stateful components by instantiating the component class three times and that's it. To work around this, I created a custom Component class that abstracts away these pydantic state shenanigans and allows to use reflex components as normal instances of their Component subclass. 
+
+All standard reflex components are also automatically converted into Component objects so that you don't have to think about it and just focus on creating your app.
 
 ## Installation
 
@@ -20,7 +23,7 @@ class Counter(rx.Component):
     count: int = 0
 
     @rx.var
-    def double_count(self):
+    def twice_the_count(self):
         return 2*self.count
 
     def increment(self):
@@ -53,7 +56,7 @@ def index():
     cnt.count=5
     cnt.background='green' # we can also edit via attribute style access after instantiation
     btn1=rx.button("Click to add 2",on_click=cnt.set_count(cnt.count+2)) # we can use state setters like this
-    cnt2=Counter(count=cnt.double_count) # we can link a second counter's state to the first's, thus synchronizing their states.
+    cnt2=Counter(count=cnt.twice_the_count) # we can link a second counter's state to some state var of the first, thus synchronizing the second counter. 
     box=rx.box(
         cnt,
         cnt2
