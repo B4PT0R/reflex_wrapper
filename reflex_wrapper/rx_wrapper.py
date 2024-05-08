@@ -6,6 +6,13 @@ Defines a generic Component class that automates State init boilerplate and prov
 import reflex
 from functools import wraps
 from copy import copy
+import uuid
+
+def capitalize(string):
+    if len(string)>0:
+        return string[0].upper()+string[1:]
+    else:
+        return ""
 
 def get_class_dict(cls,excluded=()):
     """
@@ -55,6 +62,22 @@ def auto_render(obj):
             return obj
         else:
             raise TypeError(f"{obj} should be a component object")
+
+
+def use_state(default,vartype=None):
+    """
+    Creates a state with a single var 'value' set to default and returns the corresponding state var and setter
+    """
+    vartype=vartype or type(default)
+    attributes={
+        'value':default,
+        '__annotations__':{'value':vartype}
+    }
+    cls_name="State_"+str(uuid.uuid4())
+    state=type(cls_name,(reflex.State,),attributes)
+    state_var=state.value
+    state_setter=state.set_value
+    return state_var,state_setter
 
 class Component:
 
@@ -112,7 +135,7 @@ class Component:
     
     def _is_state_attr(self,attr):
         """
-        Checks whether an attr is a state attr
+        Checks whether an attr is a user-defined state attr
         """
         if self.state is None:
             return False
@@ -131,23 +154,35 @@ class Component:
         """
         return attr.startswith('set_') and self._is_state_variable(attr[4:])
     
+    def _is_state(self,attr):
+        """
+        Check whether an attr is a valid state attr
+        """
+        return self._is_state_attr(attr) or self._is_state_setter(attr)
+    
     def _set_default(self,key,value):
         """
         Sets the default value of a state variable
         """
         self.state.__fields__[key].default=value
 
-    def _set_defaults_from_props(self,props):
+    def _set_defaults_from_props(self):
         """
         Sets defaults for state variables from props passed to the component
         Skip if the prop already refers to another state variable (possibly from another component) 
         """
-        for key in list(props.keys()):
+        for key,value in self.props.items():
             if self._is_state_variable(key):
-                value=props.pop(key)
-                if not isinstance(value,reflex.Var):
+                if isinstance(value,reflex.Var):
+                    setattr(self.state,key,value)
+                else:
                     self._set_default(key,value)
-        return props
+                    
+    def _get_reflex_props(self):
+        """
+        filters out state variables from props before passing them to the reflex constructor
+        """
+        return {k:v for k,v in self.props.items() if not self._is_state(k)}
     
     def get_component(self,*childen,**props):
         """
@@ -159,9 +194,8 @@ class Component:
         """
         Returns the corresponding reflex.Component instance and attach the state to it
         """
-        props=self._set_defaults_from_props(props)
         component=auto_render(self.get_component)(*children,**props)
-        component.State=self.state
+        #component.State=self.state
         return component
     
     def _initialize(self):
@@ -178,32 +212,23 @@ class Component:
 
     def __init__(self,*children,**props):
         self.parent=None
-        self.component=None
         self.state=None
         self.constructor=None
         self._initialize()
         self.props = dict(**props)
+        # the 'children' prop, if any, gets precedence over children passed as nested args (similar to React)
         children=self.props.get('children') or children
         for child in children:
             if isinstance(child,Component):
                 child.parent=self
         self.props['children']=children
+        self._set_defaults_from_props()
 
     def __getattr__(self,key):
         """
         Delegate attribute access to state / props
-        Any state variable (reflex.Var) passed as state prop takes precedence over local state variables.
         """
-        if self._is_state_variable(key):
-            if key in self.props:
-                value=self.props[key]
-                if isinstance(value,reflex.Var):
-                    return value
-                else:
-                    return getattr(self.state,key)
-            else:
-                return getattr(self.state,key)
-        elif self._is_state_setter(key) or self._is_state_attr(key):
+        if self._is_state(key):
             return getattr(self.state,key)
         elif key in self.props:
             return self.props[key]
@@ -219,6 +244,8 @@ class Component:
         elif self._is_state_variable(key):
             if not isinstance(value,reflex.Var):
                 self._set_default(key,value)
+            else:
+                setattr(self.state,key,value)
             self.props[key]=value
         elif self._is_state_setter(key) or self._is_state_attr(key):
             raise AttributeError("Cannot override a state method.")
@@ -240,7 +267,7 @@ class Component:
 
         # Then render the props
         props={}
-        for key,prop in self.props.items():
+        for key,prop in self._get_reflex_props().items():
             if not key=='children':
                 if isinstance(prop,Component):
                     prop=prop._render()
@@ -269,61 +296,86 @@ class App(reflex.App):
     def add_page(self,component,*args,**kwargs):
         super().add_page(auto_render(component),*args,**kwargs)
 
+def resolve_attr_chain(chain):
+    obj=reflex
+    path='reflex'
+    for attr in chain:
+        if hasattr(obj,attr):
+            path+=f'.{attr}'
+            obj=getattr(obj,attr)
+        else:
+            raise AttributeError(f"{path} has no attribute '{attr}'.")
+    return obj
+
+def chain_as_path(chain):
+    return 'reflex.'+'.'.join(chain)
+
+def chain_as_name(chain):
+    return ''.join(capitalize(name) for name in chain)
 
 class rx_submodule:
-    
-    _dict = {}
 
-    def __init__(self, submodule_name):
-        self.submodule_name = submodule_name
-        try:
-            self.module = getattr(reflex, submodule_name)
-        except AttributeError:
-            raise ImportError(f"The submodule {submodule_name} could not be found in the reflex library.")
+    """
+    Class representing a reflex submodule, to implement attribute chain lookup from the rx class.
+    Does the routing to the appropriate component/object/submodule
+    """
+
+    def __init__(self,chain):
+        self.chain=chain
+        self.path=chain_as_path(self.chain)
+        self.obj=resolve_attr_chain(self.chain)
 
     def __getattr__(self, key):
-        full_key = f"{self.submodule_name.capitalize()}{key.capitalize()}"
-        if full_key in rx_submodule._dict:
-            return rx_submodule._dict[full_key]
+        chain=self.chain+[key]
+        path=chain_as_path(chain)
+        if path in rx._dict:
+            return rx._dict[path]
+        elif hasattr(self.obj,key) and callable(getattr(self.obj,key)):
+            name=chain_as_name(chain)
+            new_cls=get_builtin_component(name=name,constructor=getattr(self.obj,key))
+            rx._dict[path]=new_cls
+            return new_cls
+        elif hasattr(self.obj,key):
+            return rx_submodule(chain)
         else:
-            try:
-                attr = getattr(self.module, key)
-                new_cls = get_builtin_component(name=full_key, constructor=attr)
-                rx_submodule._dict[full_key] = new_cls
-                return new_cls
-            except AttributeError:
-                raise AttributeError(f"No component named {key} in the {self.submodule_name} submodule.")
+            raise AttributeError(f"{self.path} has no attribute named {key}.")
 
 
 class rx_meta(type):
 
     """
-    Meta class to override __getattr__ in the RX class
-    Does the routing to the appropriate object
+    Metaclass to override __getattr__ in the rx class
+    Does the routing to the appropriate component/object/submodule
     """
 
     def __getattr__(cls, key):
         if key in cls._reserved:
             return getattr(reflex,key)
-        elif key in cls._submodules:
-            return rx_submodule(key)
         elif key in globals():
             return globals()[key]
-        elif key in cls._dict:
-            return cls._dict[key]
-        elif hasattr(reflex,key):
-            new_cls=get_builtin_component(name=key.capitalize(),constructor=getattr(reflex,key))
-            cls._dict[key]=new_cls
+        
+        chain=[key]
+        path=chain_as_path(chain)
+
+        if path in rx._dict:
+            return rx._dict[path]
+        elif hasattr(reflex,key) and callable(getattr(reflex,key)):
+            name=chain_as_name(chain)
+            new_cls=get_builtin_component(name=name,constructor=getattr(reflex,key))
+            rx._dict[path]=new_cls
             return new_cls
+        elif hasattr(reflex,key):
+            return rx_submodule(chain)
         else:
-            raise AttributeError(f"No reflex component named {key}.")
+            raise AttributeError(f"reflex has no attribute named {key}.")
+
 
 class rx(metaclass=rx_meta):
     """
     Class used as a replacement of the reflex module, supporting Components objects
+    (its __getattr__ is implemented by the metaclass defined above)
     """
-    _reserved=['page','var','cached_var','Base','State','theme','theme_panel','Var']
-    _submodules=['chakra']
+    _reserved=['page','var','cached_var','Base','State','theme','theme_panel','Var','Config']
     _dict=dict()
 
 
