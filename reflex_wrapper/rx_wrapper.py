@@ -79,6 +79,43 @@ def use_state(default,vartype=None):
     state_setter=state.set_value
     return state_var,state_setter
 
+class StateWrapper:
+
+    """
+    Class acting as a reflex.State proxy, allowing to pass reflex (computed) vars as default values for other state variables.
+    Meant to achieve optional state synchronization between components with a priori independent states.
+    """
+
+    def __init__(self,state):
+        self.state=state
+        self.dict=dict()
+
+    def __getattr__(self,attr):
+        if attr in self.dict:
+            return self.dict[attr]
+        else:
+            return getattr(self.state,attr)
+    
+    def __setattr__(self,attr,value):
+        if attr in ['state','dict']:
+            super().__setattr__(attr,value)
+        else:
+            if isinstance(value,reflex.Var):
+                self.dict[attr]=value
+            else:
+                setattr(self.state,attr,value)
+
+    def __delattr__(self,attr):
+        if attr in ['state','dict']:
+            super().__delattr__(attr)
+        else:
+            if attr in self.dict:
+                del self.dict[attr]
+            else:
+                delattr(self.state,attr)
+
+
+
 class Component:
 
     _excluded=(
@@ -173,7 +210,7 @@ class Component:
         """
         for key,value in self.props.items():
             if self._is_state_variable(key):
-                if isinstance(value,reflex.Var):
+                if isinstance(value,(reflex.Var,reflex.vars.ComputedVar)):
                     setattr(self.state,key,value)
                 else:
                     self._set_default(key,value)
@@ -205,7 +242,7 @@ class Component:
         If one is already specified at class level, this is a default component, so we use its constructor directly.
         """
         if self.__class__._constructor is None:
-            self.state=self.__class__._get_instance_state_class()
+            self.state=StateWrapper(self.__class__._get_instance_state_class())
             self.constructor=self._create
         else:
             self.constructor=self.__class__._constructor
@@ -242,7 +279,7 @@ class Component:
         if key in ['parent','constructor','component','state','props']:
             super().__setattr__(key,value)
         elif self._is_state_variable(key):
-            if not isinstance(value,reflex.Var):
+            if not isinstance(value,(reflex.Var,reflex.vars.ComputedVar)):
                 self._set_default(key,value)
             else:
                 setattr(self.state,key,value)

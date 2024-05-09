@@ -1,9 +1,9 @@
 # reflex-wrapper
 
-`reflex-wrapper` is a Python module that provides a wrapper on top of the reflex library. It mostly behaves just like the reflex module, but simplifies the public API to make creating custom components more user-friendly. The idea behind this wrapper was that, in reflex, States are pydantic models (classes) who are only instantiated per-session by the server itself. This means that you never should instantiate a state classes directly in your reflex code. As a matter of fact, what would be considered "instances" of a State in reflex are actualy subclasses of an initial pydantic rx.State class (but still classes!).
+`reflex-wrapper` is a Python module that provides a wrapper on top of the reflex library. It mostly behaves just like the reflex module, but simplifies the public API to make creating custom components more user-friendly. The idea behind this wrapper was that, in reflex, States are pydantic models (classes) who are only instantiated per-session by the server itself. This means that you never should instantiate state classes directly in your reflex code. As a matter of fact, what would be considered "instances" of a State in reflex are actualy subclasses of an initial pydantic rx.State class (but still classes!).
 This design choice, while being very elegant on a technical point of view for input validation and multi-session state management, also made the objet model less intuitive to a regular python developper, who expects to create 3 independant stateful components by instantiating the component class three times and that's it. To work around this, I created a custom Component class that abstracts away these pydantic state shenanigans and allows to use reflex components as normal instances of their Component subclass. 
 
-All standard reflex components are also automatically converted into Component objects so that you don't have to think about it and just focus on creating your app.
+All standard reflex objects accessed from the rx wrapper are automatically converted into these Components, or into objects supporting them, so that you don't have to bother about any additional overhead introduced by the wrapper and just focus on creating your app.
 
 ## Installation
 
@@ -52,15 +52,19 @@ class Counter(rx.Component):
 
 @rx.page() # Decorators still work
 def index():
-    cnt=Counter(count=10,background='blue') # we can intialize the count state value directly from props
-    cnt.count=5
-    cnt.background='green' # we can also edit via attribute style access after instantiation
-    btn1=rx.button("Click to add 2",on_click=cnt.set_count(cnt.count+2)) # we can use state setters like this
-    cnt2=Counter(count=cnt.twice_the_count) # we can link a second counter's state to some state var of the first, thus synchronizing the second counter. 
+    cnt1=Counter(count=10,background='blue') # we can intialize the count state value directly from props
+    cnt2=Counter()
+    cnt2.count=5
+    cnt2.background='green' # we can also edit via attribute style access after instantiation
+    btn1=rx.button("Click to add 2 to the first counter",on_click=cnt1.set_count(cnt1.count+2)) # state variables / methods / setters can be accessed directly from the component instance
+    cnt3=Counter(count=cnt1.twice_the_count) # we can enforce cnt3's count to echo some (computed) state var of cnt1. (methods modifying cnt3's count will have no visible effect anymore)
+    lbl1=rx.text(cnt3.count) # will show cnt1.twice_the_count 
     box=rx.box(
-        cnt,
-        cnt2
-        btn1,
+        cnt1,
+        cnt2,
+        cnt3,
+        lbl1,
+        btn1
     )
     return box
 
