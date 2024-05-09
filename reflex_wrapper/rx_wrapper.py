@@ -8,12 +8,6 @@ from functools import wraps
 from copy import copy
 import uuid
 
-def capitalize(string):
-    if len(string)>0:
-        return string[0].upper()+string[1:]
-    else:
-        return ""
-
 def get_class_dict(cls,excluded=()):
     """
     Returns a dict representing a given class, excluding chosen attributes
@@ -83,7 +77,7 @@ class StateWrapper:
 
     """
     Class acting as a reflex.State proxy, allowing to pass reflex (computed) vars as default values for other state variables.
-    Meant to achieve optional state synchronization between components with a priori independent states.
+    Meant to achieve staightforward state synchronization between components with a priori independent states.
     """
 
     def __init__(self,state):
@@ -332,6 +326,12 @@ class App(reflex.App):
 
     def add_page(self,component,*args,**kwargs):
         super().add_page(auto_render(component),*args,**kwargs)
+
+def capitalize(string):
+    if len(string)>0:
+        return string[0].upper()+string[1:]
+    else:
+        return ""
 
 def resolve_attr_chain(chain):
     obj=reflex

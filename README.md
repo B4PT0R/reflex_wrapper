@@ -3,7 +3,9 @@
 `reflex-wrapper` is a Python module that provides a wrapper on top of the reflex library. It mostly behaves just like the reflex module, but simplifies the public API to make creating custom components more user-friendly. The idea behind this wrapper was that, in reflex, States are pydantic models (classes) who are only instantiated per-session by the server itself. This means that you never should instantiate state classes directly in your reflex code. As a matter of fact, what would be considered "instances" of a State in reflex are actualy subclasses of an initial pydantic rx.State class (but still classes!).
 This design choice, while being very elegant on a technical point of view for input validation and multi-session state management, also made the objet model less intuitive to a regular python developper, who expects to create 3 independant stateful components by instantiating the component class three times and that's it. To work around this, I created a custom Component class that abstracts away these pydantic state shenanigans and allows to use reflex components as normal instances of their Component subclass. 
 
-All standard reflex objects accessed from the rx wrapper are automatically converted into these Components, or into objects supporting them, so that you don't have to bother about any additional overhead introduced by the wrapper and just focus on creating your app.
+All standard reflex objects accessed from the rx wrapper should be automatically converted into these Components, or into objects supporting them, so that you don't have to bother about any additional overhead introduced by the wrapper and just focus on creating your app.
+
+I'm rather new to Reflex, this small project is meant as an exercise and reflects my current (limited) understanding of the library. I may have neglected to cover some important functionalities. Feel free to check the source code and suggest improvements.
 
 ## Installation
 
