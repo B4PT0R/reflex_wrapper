@@ -5,22 +5,30 @@ Defines a generic Component class that automates State init boilerplate and prov
 
 import reflex
 from functools import wraps
+from types import FunctionType, CodeType
 from copy import copy
+from textwrap import dedent 
 import uuid
+
+def get_function(code_str, func_name):
+    """ Compiles a function from a code string. Returns the corresponding function object."""
+    code_str = dedent(code_str)
+    compiled_code = compile(code_str, "<string>", "exec")
+    func_code = next(obj for obj in compiled_code.co_consts if isinstance(obj, CodeType))
+    return FunctionType(func_code, globals(), func_name)
+
 
 def get_class_dict(cls,excluded=()):
     """
     Returns a dict representing a given class, excluding chosen attributes
     """
+    excluded_attributes = {'__dict__', '__weakref__', '__module__', '__qualname__','__annotations__',*excluded}
     class_dict = {
         '__name__': cls.__name__,
         '__bases__': tuple(base for base in cls.__bases__ if base != object),
-        '__metaclass__': type(cls),
-        '__annotations__':{k:v for k,v in cls.__annotations__.items() if not k in excluded}
+        '__annotations__':{k:v for k,v in cls.__annotations__.items() if not k in excluded},
+        **{k:v for k,v in cls.__dict__.items() if k not in excluded_attributes}
     }
-
-    excluded_attributes = {'__dict__', '__weakref__', '__module__', '__qualname__','__annotations__',*excluded}
-    class_dict.update({k:v for k,v in cls.__dict__.items() if k not in excluded_attributes})
     return class_dict
 
 def build_class(class_dict):
@@ -30,9 +38,7 @@ def build_class(class_dict):
     class_dict=copy(class_dict)
     name = class_dict.pop('__name__')
     bases = class_dict.pop('__bases__')
-    metaclass = class_dict.pop('__metaclass__')
-    attributes=dict(**class_dict)
-    return metaclass(name, bases, attributes)
+    return type(name, bases, class_dict)
 
 def auto_render(obj):
     """
@@ -73,102 +79,61 @@ def use_state(default,vartype=None):
     state_setter=state.set_value
     return state_var,state_setter
 
-class StateWrapper:
 
-    """
-    Class acting as a reflex.State proxy, allowing to pass reflex (computed) vars as default values for other state variables.
-    Meant to achieve staightforward state synchronization between components with a priori independent states.
-    """
+class State:
 
-    def __init__(self,state):
-        self.state=state
-        self.dict=dict()
-
-    def __getattr__(self,attr):
-        if attr in self.dict:
-            return self.dict[attr]
-        else:
-            return getattr(self.state,attr)
-    
-    def __setattr__(self,attr,value):
-        if attr in ['state','dict']:
-            super().__setattr__(attr,value)
-        else:
-            if isinstance(value,reflex.Var):
-                self.dict[attr]=value
-            else:
-                setattr(self.state,attr,value)
-
-    def __delattr__(self,attr):
-        if attr in ['state','dict']:
-            super().__delattr__(attr)
-        else:
-            if attr in self.dict:
-                del self.dict[attr]
-            else:
-                delattr(self.state,attr)
-
-
-
-class Component:
-
-    _excluded=(
-        '_excluded',
+    _private=(
+        '_private',
         '_state_model',
         '_state_attrs',
-        '_constructor',
-        '_create',
         '_setup_state_class',
         '_get_instance_state_class',
-        'get_component',
+        '_state',
         '_set_default',
-        '_set_defaults_from_props',
-        '_initialize',
         '__init__',
-        '__getattr__',
+        '__getattribute__',
         '__setattr__',
-        '_render',
         '_is_state_attr',
+        '_is_user_state_attr',
         '_is_state_variable',
         '_is_state_setter',
-        '__doc__'
+        '__doc__',
+        '__class__'
     )
-    
+
     _state_model=None
     _state_attrs=None
-    _constructor=None
     
     @classmethod
     def _setup_state_model(cls):
         """
-        Extract user defined attributes and methods from the Component subclass to construct the Pydantic state model (reflex.Base)
+        Extract user defined attributes and methods from the State subclass to construct the Pydantic state model (reflex.Base)
         """
-        details=get_class_dict(cls,excluded=cls._excluded)
+        details=get_class_dict(cls,excluded=cls._private)
         name=details['__name__']
-        cls._state_attrs=[k for k in details if k not in ('__name__','__bases__','__metaclass__','__annotations__')]
-        details.update(__name__=name+'State',__bases__=(reflex.Base,),_instance_count=0)
+        cls._state_attrs={k:v for k,v in details.items() if not k in ('__name__','__bases__','__annotations__')}
+        details.update(__name__=name+'Model',__bases__=(reflex.Base,),_instance_count=0,_state_name=name)
         cls._state_model=build_class(details)
-        # Remove state attrs from the component object to avoid messing with __getattr__
         for attr in cls._state_attrs:
             delattr(cls,attr)
    
     @classmethod 
     def _get_instance_state_class(cls):
         """
-        Copy the state model into a reflex.State subclass, unique for each component instance.
+        Copy the state model into a reflex.State subclass, unique for each State instance.
         """
         if cls._state_model is None:
             cls._setup_state_model()
         cls._state_model._instance_count += 1
-        instance_state_cls_name = f"{cls._state_model.__name__}_n{cls._state_model._instance_count}"
-        instance_state_class = type(instance_state_cls_name, (cls._state_model, reflex.State), {})
+        instance_state_cls_name = f"{cls._state_model._state_name}_n{cls._state_model._instance_count}"
+        instance_state_class = type(instance_state_cls_name, (cls._state_model, reflex.State),{})
         return instance_state_class
     
-    def _is_state_attr(self,attr):
+    def _is_user_state_attr(self,attr):
         """
         Checks whether an attr is a user-defined state attr
         """
-        if self.state is None:
+        if not hasattr(self,'_state') or self._state is None:
             return False
         else:
             return attr in self.__class__._state_attrs
@@ -177,109 +142,126 @@ class Component:
         """
         Checks whether an attr is a state variable
         """
-        return self._is_state_attr(attr) and attr in self.state.__fields__
+        return self._is_user_state_attr(attr) and attr in self._state.__fields__
     
     def _is_state_setter(self,attr):
         """
-        Checks whether an attr is a state variable setter
+        Checks whether an attr is a state setter
         """
         return attr.startswith('set_') and self._is_state_variable(attr[4:])
     
-    def _is_state(self,attr):
+    def _is_state_attr(self,attr):
         """
-        Check whether an attr is a valid state attr
+        Checks whether an attr is a valid state attribute
         """
-        return self._is_state_attr(attr) or self._is_state_setter(attr)
+        return self._is_user_state_attr(attr) or self._is_state_setter(attr)
     
     def _set_default(self,key,value):
         """
         Sets the default value of a state variable
         """
-        self.state.__fields__[key].default=value
+        if self._is_state_variable(key):
+            self._state.__fields__[key].default=value
+        else:
+            raise AttributeError(f"Could not assign state variable value. Invalid state variable: {key}")
+    
+    def __init__(self):
+        self._state=self.__class__._get_instance_state_class()
 
-    def _set_defaults_from_props(self):
+    def __getattr__(self,key):
         """
-        Sets defaults for state variables from props passed to the component
-        Skip if the prop already refers to another state variable (possibly from another component) 
+        Delegate attribute access to the reflex.State object
+        """    
+        if self._is_state_attr(key):
+            return getattr(self._state,key)
+        else:
+            raise AttributeError(f"Invalid state attribute: '{key}'")
+        
+    def __setattr__(self,key,value):
         """
-        for key,value in self.props.items():
-            if self._is_state_variable(key):
-                if isinstance(value,(reflex.Var,reflex.vars.ComputedVar)):
-                    setattr(self.state,key,value)
-                else:
-                    self._set_default(key,value)
-                    
-    def _get_reflex_props(self):
+        Delegate attribute setting to to the reflex.State object
         """
-        filters out state variables from props before passing them to the reflex constructor
-        """
-        return {k:v for k,v in self.props.items() if not self._is_state(k)}
+        if key in self.__class__._private:
+            object.__setattr__(self,key,value)
+        elif self._is_state_variable(key):
+            self._set_default(key,value)
+        elif self._is_state_attr(key):
+            raise AttributeError(f"Cannot assign to a state attribute which is not a state variable: '{key}'.")
+        else:
+            raise AttributeError(f"Invalid state attribute: '{key}'")
+        
+
+class Component(State):
+
+    _private=State._private+(
+        '_init_constructor',
+        '_constructor',
+        '_attach_state',
+        'props',
+        'get_component',
+        '_render'
+    )
+
+    _constructor=None
     
     def get_component(self,*childen,**props):
         """
         This method should be overriden when defining a custom component class
         """
         raise NotImplementedError("Custom components must implement a get_component method.")
-
-    def _create(self,*children,**props):
-        """
-        Returns the corresponding reflex.Component instance and attach the state to it
-        """
-        component=auto_render(self.get_component)(*children,**props)
-        #component.State=self.state
-        return component
     
-    def _initialize(self):
+    def _attach_state(self,func):
         """
-        Initializes the reflex.Component constructor:
-        If none is specified at class level, this is a custom component so we initialize its state and constructor accordingly
+        Decorator: takes a function returning a reflex.Component instance and attach the state to the returned component
+        """
+        @wraps(func)
+        def decorated(*args,**kwargs):
+            component=func(*args,**kwargs)
+            component.State=self._state
+            return component
+        return decorated
+
+    def _init_constructor(self):
+        """
+        The reflex.Component constructor:
+        If none is specified at class level, this is a custom component so we return the decorated custom get_component method
         If one is already specified at class level, this is a default component, so we use its constructor directly.
         """
         if self.__class__._constructor is None:
-            self.state=StateWrapper(self.__class__._get_instance_state_class())
-            self.constructor=self._create
+            self._constructor=self._attach_state(auto_render(self.get_component))
         else:
-            self.constructor=self.__class__._constructor
+            self._constructor=self.__class__._constructor
 
     def __init__(self,*children,**props):
-        self.parent=None
-        self.state=None
-        self.constructor=None
-        self._initialize()
+        State.__init__(self)
+        self._init_constructor()
         self.props = dict(**props)
         # the 'children' prop, if any, gets precedence over children passed as nested args (similar to React)
         children=self.props.get('children') or children
-        for child in children:
-            if isinstance(child,Component):
-                child.parent=self
         self.props['children']=children
-        self._set_defaults_from_props()
 
     def __getattr__(self,key):
         """
-        Delegate attribute access to state / props
+        Delegate attribute access to the reflex.State object
         """
-        if self._is_state(key):
-            return getattr(self.state,key)
+        if self._is_state_attr(key):
+            return getattr(self._state,key)
         elif key in self.props:
             return self.props[key]
         else:
-            raise AttributeError(f"Invalid attribute key: '{key}'")
+            raise AttributeError(f"Invalid component attribute: '{key}'")
         
     def __setattr__(self,key,value):
         """
-        Delegate attribute setting to state / props
+        Delegate attribute setting to to the reflex.State object or props
         """
-        if key in ['parent','constructor','component','state','props']:
-            super().__setattr__(key,value)
+        if key in self.__class__._private:
+            object.__setattr__(self,key,value)
         elif self._is_state_variable(key):
-            if not isinstance(value,(reflex.Var,reflex.vars.ComputedVar)):
-                self._set_default(key,value)
-            else:
-                setattr(self.state,key,value)
+            self._set_default(key,value)
             self.props[key]=value
-        elif self._is_state_setter(key) or self._is_state_attr(key):
-            raise AttributeError("Cannot override a state method.")
+        elif self._is_state_attr(key):
+            raise AttributeError(f"Cannot assign to a component attribute which is not a prop or state variable: '{key}'.")
         else:
             self.props[key]=value
 
@@ -298,15 +280,14 @@ class Component:
 
         # Then render the props
         props={}
-        for key,prop in self._get_reflex_props().items():
+        for key,prop in self.props.items():
             if not key=='children':
                 if isinstance(prop,Component):
                     prop=prop._render()
                 props[key]=prop
         
         # Render the component by calling the constructor
-        self.component=self.constructor(*rendered_children,**props)
-        return self.component
+        return self._constructor(*rendered_children,**props)
 
 
 def get_builtin_component(name=None,constructor=None):
@@ -412,7 +393,7 @@ class rx(metaclass=rx_meta):
     Class used as a replacement of the reflex module, supporting Components objects
     (its __getattr__ is implemented by the metaclass defined above)
     """
-    _reserved=['page','var','cached_var','Base','State','theme','theme_panel','Var','Config']
+    _reserved=['page','var','cached_var','Base','theme','theme_panel','Var','Config']
     _dict=dict()
 
 

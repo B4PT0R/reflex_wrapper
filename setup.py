@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="reflex_wrapper",
-    version="0.0.3",
+    version="0.0.4",
     author="Baptiste Ferrand",
     author_email="bferrand.maths@gmail.com",
     description="A custom wrapper on top of the reflex library to ease creating and interacting with custom components.",
